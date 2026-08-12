@@ -1,4 +1,6 @@
 # NEON//EQ
+<img width="1919" height="907" alt="image" src="https://github.com/user-attachments/assets/de941f0b-cc01-4440-80a8-6e113bae1335" />
+
 <img width="1919" height="909" alt="Screenshot 2026-08-11 231637" src="https://github.com/user-attachments/assets/b84dcb5d-ae7c-49a7-87f3-6307e3a12733" />
 
 A cyberpunk graphic equalizer for Spotify. One self-contained HTML file, zero dependencies, no build step — it taps the actual audio leaving your machine and runs a real 8192-point FFT on it, rendered as a CRT-flavored LED matrix with beat-driven glitch effects.
