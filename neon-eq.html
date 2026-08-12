@@ -1,0 +1,1689 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEON//EQ — Cyberpunk Spectrum Analyzer</title>
+<style>
+:root{
+  --bg:#04050a;
+  --panel:#080b14;
+  --line:#16203a;
+  --cyan:#00e8ff;
+  --mag:#ff2fb0;
+  --amber:#ffc247;
+  --txt:#9fb6d9;
+  --dim:#4a6088;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);
+  color:var(--txt);
+  font:12px/1.4 ui-monospace,"Cascadia Mono",Consolas,"Courier New",monospace;
+  letter-spacing:.08em;
+  overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+/* page-wide atmosphere */
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:60;
+  background:repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0 2px,rgba(0,0,0,.28) 2px 3px);
+  mix-blend-mode:multiply;opacity:.55;
+}
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:61;
+  background:radial-gradient(ellipse at 50% 45%,rgba(0,0,0,0) 45%,rgba(0,0,0,.75) 100%);
+}
+#app{display:flex;flex-direction:column;height:100%}
+
+/* ---------- chrome bars ---------- */
+.bar{
+  position:relative;z-index:10;
+  background:linear-gradient(180deg,#0a0e1a,#06080f);
+  border-bottom:1px solid var(--line);
+  padding:9px 14px;
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+}
+footer.bar{border-bottom:none;border-top:1px solid var(--line)}
+.bar::after{
+  content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;
+  background:linear-gradient(90deg,transparent,var(--cyan),var(--mag),transparent);
+  opacity:.5;
+}
+footer.bar::after{top:-1px;bottom:auto}
+
+.brand{display:flex;align-items:baseline;gap:12px;min-width:0}
+.brand .glitch{
+  font-size:17px;font-weight:700;letter-spacing:.22em;color:#eaf6ff;
+  text-shadow:0 0 12px rgba(0,232,255,.55),0 0 30px rgba(255,47,176,.3);
+  position:relative;display:inline-block;
+}
+.brand .glitch::before,.brand .glitch::after{
+  content:attr(data-text);position:absolute;left:0;top:0;width:100%;overflow:hidden;
+}
+.brand .glitch::before{color:var(--mag);animation:gl1 4.7s infinite steps(1)}
+.brand .glitch::after{color:var(--cyan);animation:gl2 6.1s infinite steps(1)}
+@keyframes gl1{0%,96%{clip-path:inset(100% 0 0 0);transform:none}
+  96.5%{clip-path:inset(12% 0 62% 0);transform:translateX(-3px)}
+  97.5%{clip-path:inset(48% 0 28% 0);transform:translateX(2px)}
+  98.5%{clip-path:inset(74% 0 8% 0);transform:translateX(-2px)}}
+@keyframes gl2{0%,97%{clip-path:inset(100% 0 0 0);transform:none}
+  97.4%{clip-path:inset(30% 0 52% 0);transform:translateX(3px)}
+  98.2%{clip-path:inset(66% 0 18% 0);transform:translateX(-3px)}}
+.brand .sub{color:var(--dim);font-size:10px;letter-spacing:.24em;white-space:nowrap}
+.kana{color:#233a5e;font-size:10px;letter-spacing:.4em}
+
+.readouts{margin-left:auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.ro{display:flex;flex-direction:column;gap:2px;min-width:56px}
+.ro label{font-size:8.5px;color:var(--dim);letter-spacing:.28em}
+.ro b{font-size:12.5px;font-weight:600;color:#cfe6ff;letter-spacing:.06em}
+.ro b.hot{color:var(--amber)}
+.led{
+  width:9px;height:9px;border-radius:50%;background:#1d2740;
+  box-shadow:0 0 0 1px #223050 inset;transition:background .12s,box-shadow .12s;
+}
+.led.live{background:var(--cyan);box-shadow:0 0 10px var(--cyan),0 0 22px rgba(0,232,255,.5)}
+
+/* BPM: pulse dot beats in time, value dims when the estimate is not locked */
+.ro.bpm{position:relative}
+#bpmDot{
+  position:absolute;right:-10px;top:15px;width:6px;height:6px;border-radius:50%;
+  background:var(--mag);box-shadow:0 0 8px var(--mag),0 0 16px rgba(255,47,176,.6);
+  opacity:0;pointer-events:none;
+}
+#roBpm.soft{color:var(--dim)}
+.led.clip{background:#ff3355;box-shadow:0 0 10px #ff3355,0 0 24px rgba(255,51,85,.6)}
+
+/* ---------- stage ---------- */
+main{position:relative;flex:1;min-height:0;background:#04050a}
+canvas{display:block;width:100%;height:100%}
+.msg{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  background:rgba(6,9,17,.94);border:1px solid var(--mag);
+  padding:16px 22px;max-width:min(620px,86%);z-index:20;
+  box-shadow:0 0 40px rgba(255,47,176,.28);
+  clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));
+}
+.msg h3{color:var(--mag);font-size:12px;letter-spacing:.24em;margin-bottom:7px}
+.msg p{color:var(--txt);font-size:11.5px;line-height:1.75}
+.hidden{display:none}
+
+/* ---------- full window mode ---------- */
+body.fullwin header.bar,
+body.fullwin footer.bar{display:none}
+body.fullwin main{cursor:none}
+body.fullwin.reveal main{cursor:default}
+
+#fwbar{
+  position:absolute;top:0;right:0;z-index:25;
+  display:none;align-items:center;gap:12px;
+  padding:9px 12px;
+  background:linear-gradient(180deg,rgba(6,9,17,.92),rgba(6,9,17,0));
+  opacity:0;transition:opacity .25s;pointer-events:none;
+}
+body.fullwin #fwbar{display:flex}
+body.fullwin.reveal #fwbar{opacity:1;pointer-events:auto}
+#fwInfo{font-size:10px;color:var(--dim);letter-spacing:.2em;white-space:nowrap}
+#fwInfo b{color:#cfe6ff;font-weight:600}
+
+#fwhint{
+  position:absolute;left:50%;bottom:34px;transform:translateX(-50%);
+  z-index:26;padding:9px 18px;white-space:nowrap;
+  background:rgba(6,9,17,.9);border:1px solid var(--cyan);
+  color:#dff6ff;font-size:10.5px;letter-spacing:.24em;
+  box-shadow:0 0 26px rgba(0,232,255,.3);
+  opacity:0;pointer-events:none;transition:opacity .4s;
+  clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,9px 100%,0 calc(100% - 9px));
+}
+#fwhint.show{opacity:1}
+#fwhint b{color:var(--mag);font-weight:600}
+
+/* ---------- controls ---------- */
+.grp{display:flex;align-items:center;gap:7px}
+.grp>label{font-size:8.5px;color:var(--dim);letter-spacing:.26em}
+.sep{width:1px;height:22px;background:var(--line)}
+
+button,select{
+  font:inherit;font-size:10.5px;letter-spacing:.16em;
+  background:#0c1220;color:var(--txt);
+  border:1px solid #1e2c4a;padding:7px 12px;cursor:pointer;
+  transition:.14s;text-transform:uppercase;
+}
+button:hover,select:hover{border-color:var(--cyan);color:#dff6ff;box-shadow:0 0 12px rgba(0,232,255,.22)}
+button.on{
+  border-color:var(--mag);color:#fff;background:#1a0c1a;
+  box-shadow:0 0 14px rgba(255,47,176,.35),0 0 30px rgba(255,47,176,.15) inset;
+}
+button.primary{border-color:var(--cyan);color:#dff6ff}
+button.primary:hover{background:#07202b}
+select{padding:6px 8px}
+option{background:#0c1220}
+
+input[type=range]{
+  -webkit-appearance:none;appearance:none;width:104px;height:3px;
+  background:#1b2740;outline:none;cursor:pointer;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:11px;height:17px;background:var(--cyan);
+  cursor:pointer;box-shadow:0 0 10px var(--cyan);
+}
+input[type=range]::-moz-range-thumb{
+  width:11px;height:17px;border:none;border-radius:0;background:var(--cyan);
+  cursor:pointer;box-shadow:0 0 10px var(--cyan);
+}
+.val{font-size:10px;color:#cfe6ff;min-width:40px}
+
+/* ---------- help ---------- */
+#help{
+  position:absolute;inset:0;z-index:30;display:none;
+  background:rgba(3,5,10,.93);padding:26px;overflow:auto;
+}
+#help.show{display:block}
+#help .card{
+  max-width:760px;margin:0 auto;border:1px solid var(--line);
+  background:linear-gradient(180deg,#080c16,#05070e);padding:24px 26px;
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));
+}
+#help h2{color:var(--cyan);font-size:13px;letter-spacing:.26em;margin-bottom:16px;
+  text-shadow:0 0 14px rgba(0,232,255,.5)}
+#help h4{color:var(--mag);font-size:11px;letter-spacing:.2em;margin:18px 0 7px}
+#help p,#help li{font-size:11.5px;line-height:1.85;color:var(--txt)}
+#help ol,#help ul{margin-left:17px}
+#help b{color:#dff6ff;font-weight:600}
+#help .k{
+  display:inline-block;border:1px solid #22314f;padding:1px 6px;
+  color:#cfe6ff;font-size:10px;margin-right:4px;
+}
+#help .note{margin-top:18px;padding-top:14px;border-top:1px solid var(--line);color:var(--dim);font-size:10.5px}
+
+/* recording state: unmistakably armed */
+button.rec{
+  border-color:#ff3355;color:#fff;background:#1a0d12;
+  animation:recpulse 1.1s ease-in-out infinite;
+}
+@keyframes recpulse{
+  0%,100%{box-shadow:0 0 10px rgba(255,51,85,.4)}
+  50%{box-shadow:0 0 22px rgba(255,51,85,.85)}
+}
+
+@media (max-width:900px){
+  .brand .sub,.kana{display:none}
+  .ro{min-width:48px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="bar">
+    <div class="brand">
+      <span class="glitch" data-text="NEON//EQ">NEON//EQ</span>
+      <span class="sub">31-BAND SPECTRUM ANALYZER</span>
+      <span class="kana">音響解析</span>
+    </div>
+    <div class="readouts">
+      <div class="ro"><label>SOURCE</label><b id="roSrc">STANDBY</b></div>
+      <div class="ro"><label>RATE</label><b id="roRate">—</b></div>
+      <div class="ro"><label>PEAK</label><b id="roPeak">—</b></div>
+      <div class="ro"><label>RMS</label><b id="roRms">—</b></div>
+      <div class="ro"><label>DOM</label><b id="roDom">—</b></div>
+      <div class="ro bpm"><label>BPM</label><b id="roBpm">—</b><i id="bpmDot"></i></div>
+      <div class="led" id="led"></div>
+    </div>
+  </header>
+
+  <main>
+    <canvas id="cv"></canvas>
+    <div id="msg" class="msg hidden"><h3 id="msgT"></h3><p id="msgB"></p></div>
+    <div id="fwbar">
+      <span id="fwInfo"></span>
+      <button id="bExitFw">⤡ Exit Full Window</button>
+    </div>
+    <div id="fwhint">FULL WINDOW &nbsp;·&nbsp; PRESS <b>W</b> OR <b>ESC</b> TO EXIT</div>
+    <div id="help">
+      <div class="card">
+        <h2>▸ PIPING SPOTIFY INTO THE ANALYZER</h2>
+        <p>Spotify exposes no visualizer plugin API, so this reads the actual audio leaving your
+           machine via Chrome's screen-capture pipeline. Nothing is uploaded anywhere — the samples go
+           straight into an FFT and die there, unless you press <b>⏺ REC</b>, which saves a 15 s WebM
+           clip (with the source audio) to your own downloads and nowhere else.</p>
+
+        <h4>A · SPOTIFY DESKTOP APP</h4>
+        <ol>
+          <li>Start playback in Spotify.</li>
+          <li>Hit <b>SYSTEM AUDIO</b> below.</li>
+          <li>In the picker choose the <b>Entire Screen</b> tab, click your screen, and — this is the part
+              everyone misses — tick <b>Also share system audio</b> at the bottom left.</li>
+          <li>Share. Sound keeps playing through your speakers as normal.</li>
+        </ol>
+
+        <h4>B · SPOTIFY WEB PLAYER</h4>
+        <ol>
+          <li>Play in an <b>open.spotify.com</b> tab.</li>
+          <li>Hit <b>SYSTEM AUDIO</b>, pick the <b>Chrome Tab</b> tab, select the Spotify tab,
+              tick <b>Also share tab audio</b>.</li>
+        </ol>
+
+        <h4>C · NO CAPTURE AVAILABLE</h4>
+        <p><b>MIC</b> listens through your microphone — speakers out loud, phone in the room, a turntable
+           on a line-in. Rough but it dances. <b>DEMO</b> runs a synthetic track with no permissions at all.</p>
+
+        <h4>KEYS</h4>
+        <p>
+          <span class="k">W</span>full window
+          <span class="k">F</span>fullscreen
+          <span class="k">D</span>demo
+          <span class="k">A</span>auto gain
+          <span class="k">C</span>record 15 s clip
+          <span class="k">H</span>cell shape
+          <span class="k">R</span>wireframe
+          <span class="k">M</span>mirror
+          <span class="k">G</span>glitch
+          <span class="k">P</span>next palette (⇧P back)
+          <span class="k">1-9</span>palette
+          <span class="k">↑↓</span>gain
+          <span class="k">?</span>this panel
+          <span class="k">ESC</span>close
+        </p>
+
+        <div class="note">
+          Bands are log-spaced 25 Hz → 16 kHz on ISO third-octave spacing. A +3.5 dB/octave pink tilt is
+          applied so treble detail is visible instead of hugging the floor — same trick hardware RTAs use.
+          Ballistics are fast-attack / slow-release with 550 ms peak hold and gravity fall.
+          <b>AGC</b> ranges the input automatically so peaks ride just under the top on any master —
+          the GAIN slider then acts as a bias on top of it. After ~8 s of silence the display drops
+          to standby and wakes on signal; while visible, the page holds a screen wake lock so the
+          monitor stays on.
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="bar controls">
+    <div class="grp">
+      <button id="bSys" class="primary">▶ System Audio</button>
+      <button id="bMic">Mic</button>
+      <button id="bDemo" class="on">Demo</button>
+      <button id="bStop">Stop</button>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <label>BANDS</label>
+      <select id="selBands">
+        <option value="16">16</option>
+        <option value="24">24</option>
+        <option value="31" selected>31</option>
+        <option value="48">48</option>
+        <option value="64">64</option>
+      </select>
+    </div>
+    <div class="grp">
+      <label>PALETTE</label>
+      <select id="selPal">
+        <option value="0" selected>Neon</option>
+        <option value="1">Acid</option>
+        <option value="2">Inferno</option>
+        <option value="3">Ice</option>
+        <option value="4">Vapor</option>
+        <option value="5">Outrun</option>
+        <option value="6">Plasma</option>
+        <option value="7">Toxic</option>
+        <option value="8">Spectrum</option>
+        <option value="9">Aurora</option>
+        <option value="10">Miami</option>
+        <option value="11">Ultraviolet</option>
+        <option value="12">Rose Gold</option>
+        <option value="13">Noir</option>
+        <option value="14">Edgerunner</option>
+        <option value="15">HAL 9000</option>
+        <option value="16">Nerf</option>
+      </select>
+    </div>
+    <div class="grp">
+      <label>CELL</label>
+      <select id="selShape">
+        <option value="0" selected>Square</option>
+        <option value="1">Hex</option>
+        <option value="2">Triangle</option>
+        <option value="3">Skull</option>
+        <option value="4">Heart</option>
+      </select>
+    </div>
+    <div class="grp">
+      <label>GAIN</label>
+      <button id="bAgc" title="Auto gain: ranges the input so peaks ride the top; the slider becomes a bias">AGC</button>
+      <input type="range" id="rGain" min="-12" max="30" step="1" value="6">
+      <span class="val" id="vGain">+6 dB</span>
+    </div>
+    <div class="grp">
+      <label>DECAY</label>
+      <input type="range" id="rDecay" min="60" max="900" step="10" value="280">
+      <span class="val" id="vDecay">280ms</span>
+    </div>
+    <div class="grp">
+      <label>BLOOM</label>
+      <input type="range" id="rBloom" min="0" max="150" step="5" value="85">
+      <span class="val" id="vBloom">85%</span>
+    </div>
+    <div class="grp">
+      <label>GL AMT</label>
+      <input type="range" id="rGAmt" min="0" max="200" step="5" value="100">
+      <span class="val" id="vGAmt">100%</span>
+    </div>
+    <div class="grp">
+      <label>GL SENS</label>
+      <input type="range" id="rGSens" min="0" max="100" step="1" value="50">
+      <span class="val" id="vGSens">50%</span>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <button id="bRec" title="Record a 15 s WebM clip of the display — with source audio when a capture is live">⏺ Rec</button>
+      <button id="bWire">◇ Wire</button>
+      <button id="bMirror" class="on">Mirror</button>
+      <button id="bGlitch" class="on">Glitch</button>
+      <button id="bFullWin">◱ Full Window</button>
+      <button id="bFull">⛶ Fullscreen</button>
+      <button id="bHelp">?</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   NEON//EQ — cyberpunk graphic equalizer
+   Zero dependencies. Real FFT off real audio.
+   ============================================================ */
+
+const $ = id => document.getElementById(id);
+const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
+const lerp  = (a,b,t) => a + (b - a) * t;
+
+/* ---------- persisted settings ---------- */
+const DEFAULTS = { bands:31, pal:0, gain:6, decay:280, bloom:85, mirror:true, glitch:true,
+                   fullwin:false, shape:0, wire:false, glitchAmt:100, glitchSens:50, agc:true };
+let S = Object.assign({}, DEFAULTS);
+try {
+  const raw = localStorage.getItem("neoneq");
+  if (raw) S = Object.assign(S, JSON.parse(raw));
+} catch (e) { /* private mode, whatever */ }
+const save = () => { try { localStorage.setItem("neoneq", JSON.stringify(S)); } catch (e) {} };
+
+/* ---------- analysis constants ---------- */
+const F_MIN = 25, F_MAX = 16000;
+const FLOOR_DB = -74, CEIL_DB = -14;   // maps to bar bottom / top
+const TILT_PER_OCT = 3.5;              // pink-noise compensation, referenced at 250 Hz
+const HOLD_S = 0.55;                   // peak cap hold before it falls
+const GRAVITY = 1.15;                  // peak cap fall acceleration (screens/s^2)
+
+/* ---------- audio graph ---------- */
+let ac = null, analyser = null, srcNode = null, stream = null;
+let freqBuf = null, timeBuf = null;
+let mode = "demo";                     // demo | system | mic
+let srcLabel = "DEMO";
+
+/* ---------- per-band state ---------- */
+let N = 0;
+let centers = [], edgeLo = [], edgeHi = [], binLo = [], binHi = [];
+let val = [], peak = [], peakHold = [], peakVel = [];
+
+function buildBands(n) {
+  N = n;
+  centers = new Array(n); edgeLo = new Array(n); edgeHi = new Array(n);
+  val = new Float32Array(n); peak = new Float32Array(n);
+  peakHold = new Float32Array(n); peakVel = new Float32Array(n);
+
+  // geometric spacing: each band spans an equal ratio of the audible range
+  const ratio = Math.pow(F_MAX / F_MIN, 1 / n);
+  for (let i = 0; i < n; i++) {
+    edgeLo[i]  = F_MIN * Math.pow(ratio, i);
+    edgeHi[i]  = F_MIN * Math.pow(ratio, i + 1);
+    centers[i] = Math.sqrt(edgeLo[i] * edgeHi[i]);
+  }
+  mapBins();
+}
+
+function mapBins() {
+  binLo = new Int32Array(N); binHi = new Int32Array(N);
+  if (!analyser || !ac) return;
+  const binHz = ac.sampleRate / analyser.fftSize;
+  const maxBin = analyser.frequencyBinCount - 1;
+  for (let i = 0; i < N; i++) {
+    let lo = Math.floor(edgeLo[i] / binHz);
+    let hi = Math.ceil (edgeHi[i] / binHz) - 1;
+    lo = clamp(lo, 1, maxBin);
+    hi = clamp(hi, lo, maxBin);
+    binLo[i] = lo; binHi[i] = hi;
+  }
+}
+
+/* ---------- canvas ---------- */
+const cv = $("cv");
+const ctx = cv.getContext("2d", { alpha:false });
+const fx  = document.createElement("canvas");          // sharp bars, bloom source
+const fxc = fx.getContext("2d");
+const bl1 = document.createElement("canvas");          // bloom, 1/2 res
+const bl1c = bl1.getContext("2d");
+const bl2 = document.createElement("canvas");          // bloom, 1/4 res
+const bl2c = bl2.getContext("2d");
+const gh  = document.createElement("canvas");          // cached unlit ghost grid
+const ghc = gh.getContext("2d");
+let ghKey = "";                                        // geometry fingerprint
+
+let W = 0, H = 0, U = 1;                                // device px + unit scale
+let scanPat = null, noiseTile = null, vignette = null;
+
+function makeScanlines() {
+  const c = document.createElement("canvas");
+  const step = Math.max(2, Math.round(3 * U));
+  c.width = 1; c.height = step;
+  const g = c.getContext("2d");
+  g.fillStyle = "rgba(0,0,0,0.30)";
+  g.fillRect(0, step - Math.max(1, Math.round(step / 3)), 1, Math.max(1, Math.round(step / 3)));
+  scanPat = ctx.createPattern(c, "repeat");
+}
+
+function makeNoise() {
+  const c = document.createElement("canvas");
+  c.width = c.height = 140;
+  const g = c.getContext("2d");
+  const img = g.createImageData(140, 140);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = (Math.random() * 255) | 0;
+    img.data[i] = img.data[i+1] = img.data[i+2] = v;
+    img.data[i+3] = 16;
+  }
+  g.putImageData(img, 0, 0);
+  noiseTile = c;
+}
+
+function makeVignette() {
+  const g = ctx.createRadialGradient(W/2, H*0.48, Math.min(W,H)*0.22, W/2, H*0.5, Math.max(W,H)*0.72);
+  g.addColorStop(0,   "rgba(0,0,0,0)");
+  g.addColorStop(0.62,"rgba(0,0,0,0.28)");
+  g.addColorStop(1,   "rgba(0,0,0,0.82)");
+  vignette = g;
+}
+
+function resize() {
+  const r = cv.getBoundingClientRect();
+  const u = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.round(r.width  * u);
+  const h = Math.round(r.height * u);
+
+  // not laid out yet (hidden tab, zero-size container). W=0 parks the loop
+  // until the observer calls back with a real box.
+  if (w < 2 || h < 2) { W = 0; return; }
+  if (w === W && h === H && u === U) return;   // reallocating buffers clears them; don't
+
+  U = u; W = w; H = h;
+  cv.width = W; cv.height = H;
+  fx.width = W; fx.height = H;
+  bl1.width = Math.max(1, W >> 1); bl1.height = Math.max(1, H >> 1);
+  bl2.width = Math.max(1, W >> 2); bl2.height = Math.max(1, H >> 2);
+  makeScanlines(); makeVignette();
+}
+
+// Observe the element, not the window: this also catches the full-window class
+// toggle, fullscreen transitions, and late layout — none of which fire `resize`.
+if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
+window.addEventListener("resize", resize);
+
+/* ---------- palettes: bottom → top of a bar ---------- */
+const PALETTES = [
+  { name:"NEON",    stops:[[0,[0,232,255]], [0.42,[110,86,255]], [0.74,[255,47,176]], [1,[255,214,110]]] },
+  { name:"ACID",    stops:[[0,[0,255,150]], [0.45,[170,255,40]], [0.78,[255,232,0]],  [1,[255,255,235]]] },
+  { name:"INFERNO", stops:[[0,[120,0,220]], [0.38,[255,40,80]],  [0.74,[255,150,0]],  [1,[255,245,190]]] },
+  { name:"ICE",     stops:[[0,[0,110,255]], [0.45,[0,225,255]],  [0.8,[170,250,255]], [1,[255,255,255]]] },
+  { name:"VAPOR",   stops:[[0,[5,255,180]],  [0.38,[1,205,254]], [0.72,[185,103,255]],[1,[255,113,206]]] },
+  { name:"OUTRUN",  stops:[[0,[70,20,190]],  [0.40,[255,20,120]],[0.75,[255,130,20]], [1,[255,240,150]]] },
+  { name:"PLASMA",  stops:[[0,[40,0,255]],   [0.42,[150,0,255]], [0.76,[255,0,200]],  [1,[255,220,255]]] },
+  { name:"TOXIC",   stops:[[0,[80,0,160]],   [0.40,[0,255,80]],  [0.75,[200,255,0]],  [1,[255,255,220]]] },
+  { name:"SPECTRUM",stops:[[0,[255,0,90]],   [0.33,[255,190,0]], [0.66,[0,255,140]],  [1,[0,190,255]]] },
+  { name:"AURORA",  stops:[[0,[0,80,190]],   [0.38,[0,225,170]], [0.72,[150,255,130]],[1,[250,190,255]]] },
+  { name:"MIAMI",   stops:[[0,[0,225,205]],  [0.36,[0,170,255]], [0.72,[255,80,180]], [1,[255,205,150]]] },
+  { name:"ULTRAVIOLET",stops:[[0,[25,0,110]],[0.40,[110,0,255]], [0.75,[200,70,255]], [1,[255,215,255]]] },
+  { name:"ROSEGOLD",stops:[[0,[110,15,75]],  [0.40,[255,85,125]],[0.75,[255,175,120]],[1,[255,238,215]]] },
+  { name:"NOIR",    stops:[[0,[55,68,92]],   [0.42,[130,155,190]],[0.76,[215,232,255]],[1,[255,255,255]]] },
+  // Yellow to blue are near-complementary: interpolated straight they cross a
+  // dead grey, so this routes through green and cyan to stay vivid the whole way.
+  { name:"EDGERUNNER",stops:[[0,[252,238,10]],[0.35,[160,250,90]],[0.70,[0,225,255]], [1,[50,110,255]]] },
+  { name:"HAL9000",  stops:[[0,[140,0,25]],  [0.40,[255,20,40]], [0.75,[255,75,70]],  [1,[255,195,185]]] },
+  // Same complementary problem; this one crosses a warm near-white instead.
+  { name:"NERF",     stops:[[0,[0,105,255]], [0.34,[90,200,255]],[0.66,[255,195,120]],[1,[255,120,10]]] }
+];
+
+function palColor(t) {
+  const st = PALETTES[S.pal].stops;
+  t = clamp(t, 0, 1);
+  for (let i = 0; i < st.length - 1; i++) {
+    if (t <= st[i+1][0]) {
+      const span = st[i+1][0] - st[i][0] || 1;
+      const k = (t - st[i][0]) / span;
+      const a = st[i][1], b = st[i+1][1];
+      return [Math.round(lerp(a[0],b[0],k)), Math.round(lerp(a[1],b[1],k)), Math.round(lerp(a[2],b[2],k))];
+    }
+  }
+  const l = st[st.length-1][1];
+  return [l[0], l[1], l[2]];
+}
+const rgba = (c,a) => "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")";
+
+/* ---------- cell geometry ----------
+   One LED cell, appended to whatever path the caller already opened, so a whole
+   row stays a single fill (or stroke) no matter which shape is selected.
+   Hex is flat-top: cells are wider than tall, so chamfering the left and right
+   ends reads as a hexagon while a pointy-top one would just look squashed. */
+const SQUARE = 0, HEX = 1, TRI = 2, SKULL = 3, HEART = 4;
+const PICTORIAL = s => s === SKULL || s === HEART;   // need near-square cells to read
+
+function cellPath(g, x, y, w, h, shape, flip) {
+  if (shape === SQUARE) { g.rect(x, y, w, h); return; }
+
+  if (shape === TRI) {                         // flip alternates point-up / point-down
+    if (flip) { g.moveTo(x, y); g.lineTo(x + w, y); g.lineTo(x + w * 0.5, y + h); }
+    else      { g.moveTo(x + w * 0.5, y); g.lineTo(x + w, y + h); g.lineTo(x, y + h); }
+    g.closePath();
+    return;
+  }
+
+  if (shape === HEART) {
+    const px = u => x + u * w, py = v => y + v * h;
+    g.moveTo(px(0.50), py(0.30));
+    g.bezierCurveTo(px(0.50), py(0.10), px(0.33), py(0.00), px(0.18), py(0.00));
+    g.bezierCurveTo(px(0.02), py(0.00), px(0.00), py(0.20), px(0.00), py(0.30));
+    g.bezierCurveTo(px(0.00), py(0.50), px(0.18), py(0.68), px(0.50), py(1.00));
+    g.bezierCurveTo(px(0.82), py(0.68), px(1.00), py(0.50), px(1.00), py(0.30));
+    g.bezierCurveTo(px(1.00), py(0.20), px(0.98), py(0.00), px(0.82), py(0.00));
+    g.bezierCurveTo(px(0.67), py(0.00), px(0.50), py(0.10), px(0.50), py(0.30));
+    g.closePath();
+    return;
+  }
+
+  if (shape === SKULL) {
+    const px = u => x + u * w, py = v => y + v * h;
+    // Cranium, cheekbone taper, jaw. Wound positive.
+    g.moveTo(px(0.06), py(0.46));
+    g.bezierCurveTo(px(0.06), py(0.11), px(0.26), py(0.00), px(0.50), py(0.00));
+    g.bezierCurveTo(px(0.74), py(0.00), px(0.94), py(0.11), px(0.94), py(0.46));
+    g.bezierCurveTo(px(0.94), py(0.64), px(0.86), py(0.70), px(0.78), py(0.73));
+    g.lineTo(px(0.76), py(1.00));
+    g.lineTo(px(0.24), py(1.00));
+    g.lineTo(px(0.22), py(0.73));
+    g.bezierCurveTo(px(0.14), py(0.70), px(0.06), py(0.64), px(0.06), py(0.46));
+    g.closePath();
+    // Sockets wound the OTHER way, so nonzero winding punches them through as
+    // holes rather than filling them in.
+    const socket = (cx, cy, rx, ry) => {
+      g.moveTo(x + (cx + rx) * w, y + cy * h);
+      g.ellipse(x + cx * w, y + cy * h, rx * w, ry * h, 0, 0, Math.PI * 2, true);
+    };
+    socket(0.30, 0.44, 0.145, 0.155);
+    socket(0.70, 0.44, 0.145, 0.155);
+    return;
+  }
+
+  const k = Math.min(w * 0.30, h * 0.62);      // chamfer depth, always leaves a flat top
+  const my = y + h * 0.5;
+  g.moveTo(x + k, y);
+  g.lineTo(x + w - k, y);
+  g.lineTo(x + w, my);
+  g.lineTo(x + w - k, y + h);
+  g.lineTo(x + k, y + h);
+  g.lineTo(x, my);
+  g.closePath();
+}
+
+let rowColors = [], rowsCached = -1, palCached = -1;
+function cacheRowColors(rows) {
+  if (rows === rowsCached && S.pal === palCached) return;
+  rowsCached = rows; palCached = S.pal;
+  rowColors = new Array(rows);
+  for (let r = 0; r < rows; r++) rowColors[r] = palColor(r / Math.max(1, rows - 1));
+}
+
+/* ---------- beat / tempo ---------- */
+let bassHist = [], lastBeat = -9;
+let flash = 0, shake = 0, split = 0, bpm = 0;
+let slices = [], sliceTTL = 0;
+
+function detectBeat(t, dt) {
+  let bass = 0, n = 0;
+  for (let i = 0; i < N; i++) {
+    if (centers[i] > 160) break;
+    bass += val[i]; n++;
+  }
+  bass = n ? bass / n : 0;
+
+  bassHist.push(bass);
+  if (bassHist.length > 46) bassHist.shift();
+  let avg = 0;
+  for (let i = 0; i < bassHist.length; i++) avg += bassHist[i];
+  avg /= bassHist.length || 1;
+
+  // Sensitivity slides all three trigger conditions at once. 50 reproduces the
+  // original fixed thresholds exactly, so the default look is unchanged.
+  const sens = S.glitchSens / 100;
+  const ratioTh = lerp(1.64, 1.00, sens);      // how far above the running mean
+  const floorTh = lerp(0.42, 0.06, sens);      // absolute floor, ignores quiet passages
+  const refract = lerp(0.32, 0.12, sens);      // minimum gap between triggers
+
+  const strong = idleAmt < 0.5 &&              // no glitching off the noise floor
+    bass > avg * ratioTh && bass > floorTh && (t - lastBeat) > refract;
+  if (strong) {
+    lastBeat = t;
+    flash = Math.min(1, flash + 0.75);
+    if (S.glitch) {
+      const gAmt = S.glitchAmt / 100;
+      split = Math.min(1, split + 0.85);
+      shake = Math.min(1, shake + 0.55);
+      if (Math.random() < Math.min(0.9, 0.22 * gAmt)) {
+        slices = [];
+        const count = 2 + ((Math.random() * 3) | 0);
+        for (let i = 0; i < count; i++) {
+          slices.push({
+            y: Math.random() * H,
+            h: (6 + Math.random() * 34) * U,
+            dx: (Math.random() - 0.5) * 46 * U * gAmt
+          });
+        }
+        sliceTTL = 0.09;
+      }
+    }
+  }
+
+  const k = Math.exp(-dt / 0.16);
+  flash *= k; split *= Math.exp(-dt / 0.10); shake *= Math.exp(-dt / 0.07);
+  sliceTTL -= dt;
+}
+
+/* ---------- tempo ----------
+   Bass-energy transients above drive the visual punch. Tempo is a separate
+   problem: thresholding absolute energy fails on limited masters, where beats
+   never rise far enough above their own running average. So instead we build a
+   spectral-flux onset envelope (sum of positive change across bands) and
+   autocorrelate it. That looks for periodicity in how the spectrum *changes*,
+   which survives compression, and needs no threshold to be tuned. */
+const ODF_HZ = 100, ODF_DT = 1 / ODF_HZ, ODF_LEN = 600;   // 6 s of history
+const LAG_MIN = 30, LAG_MAX = 100;                        // 200 .. 60 BPM
+const ODF_FLOOR = 1e-5;                                   // below this it's silence, not music
+const odf = new Float32Array(ODF_LEN);
+const odfWork = new Float32Array(ODF_LEN);
+const acf = new Float32Array(LAG_MAX + 2);
+let odfW = 0, odfFill = 0, odfCarry = 0, prevBand = null;
+let tempoAcc = 0, bpmConf = 0, odfVar = 0;
+
+function resetTempo() {
+  odf.fill(0); odfW = 0; odfFill = 0; odfCarry = 0;
+  prevBand = null; bpm = 0; bpmConf = 0; tempoAcc = 0;
+}
+
+// Sample-and-hold onto a fixed grid so autocorrelation lags map to real seconds
+// regardless of frame rate. Holding the rate (not the raw sum) avoids punching
+// zeros into the envelope when one frame spans two grid steps.
+function pushOnset(flux, dt) {
+  const rate = flux / Math.max(dt, 1e-4);
+  odfCarry += dt;
+  let guard = 0;
+  while (odfCarry >= ODF_DT && guard++ < 8) {
+    odfCarry -= ODF_DT;
+    odf[odfW] = rate * ODF_DT;
+    odfW = (odfW + 1) % ODF_LEN;
+    if (odfFill < ODF_LEN) odfFill++;
+  }
+}
+
+function estimateTempo() {
+  if (odfFill < ODF_LEN) return;                  // wait for a full 6 s window
+
+  const x = odfWork;
+  let mean = 0;
+  for (let i = 0; i < ODF_LEN; i++) { x[i] = odf[(odfW + i) % ODF_LEN]; mean += x[i]; }
+  mean /= ODF_LEN;
+  let energy = 0;
+  for (let i = 0; i < ODF_LEN; i++) { x[i] -= mean; energy += x[i] * x[i]; }
+  const var0 = odfVar = energy / ODF_LEN;
+  if (var0 < ODF_FLOOR) { bpm = 0; bpmConf = 0; return; }    // silence / no real signal
+
+  // Biased autocorrelation (divide by the full length, not the overlap),
+  // normalised against the variance so it's a correlation coefficient in
+  // [-1,1]. Biased matters: the unbiased form scales short overlaps up and
+  // makes the estimator latch onto half-tempo. Comparing the peak against the
+  // mean of the curve is no good either — for a cleanly periodic signal that
+  // mean is negative, which is precisely the case we most want to report.
+  let best = -Infinity, bestLag = 0;
+  for (let lag = LAG_MIN; lag <= LAG_MAX; lag++) {
+    let s = 0;
+    for (let i = 0, n = ODF_LEN - lag; i < n; i++) s += x[i] * x[i + lag];
+    const r = s / (ODF_LEN * var0);
+    acf[lag] = r;
+    if (r > best) { best = r; bestLag = lag; }
+  }
+  if (best < 0.10) { bpm = 0; bpmConf = 0; return; }         // nothing periodic enough
+
+  // If half the winning lag correlates nearly as well, the peak was a half-tempo
+  // harmonic and the fundamental is the better answer. Compare windowed sums,
+  // not single bins: a period of 37.5 samples spreads its correlation over four
+  // lags while its harmonic at 75 lands on an exact integer and out-peaks it,
+  // even though the fundamental carries more total energy.
+  const window = lag => {
+    let s = 0;
+    for (let l = lag - 2; l <= lag + 2; l++) if (l >= LAG_MIN && l <= LAG_MAX) s += acf[l];
+    return s;
+  };
+  // Test 1/4, 1/3 and 1/2 of the winning lag, taking the smallest that holds up:
+  // harmonics sit at integer multiples of the true period, so the fundamental is
+  // always the shortest valid lag. Checking only 1/2 misses cases like 180 BPM,
+  // whose period of 33.3 samples puts its *third* harmonic on exactly 100.
+  let peak = bestLag;
+  const wBest = window(bestLag);
+  for (let d = 4; d >= 2; d--) {
+    const cand = Math.round(bestLag / d);
+    if (cand - 2 < LAG_MIN) continue;
+    if (window(cand) > wBest * 0.60) {
+      let hBest = -Infinity;
+      for (let l = cand - 2; l <= cand + 2; l++) {
+        if (l < LAG_MIN || l > LAG_MAX) continue;
+        if (acf[l] > hBest) { hBest = acf[l]; peak = l; }
+      }
+      break;                                      // d descends, so this is the smallest
+    }
+  }
+
+  // Sub-sample peak location by centre of mass rather than a parabola fit — the
+  // smear from a fractional period is asymmetric, and a 3-point parabola biases
+  // the answer, where the centroid recovers the true fractional lag.
+  let num = 0, den = 0;
+  for (let l = peak - 2; l <= peak + 2; l++) {
+    if (l < LAG_MIN || l > LAG_MAX) continue;
+    const wgt = Math.max(0, acf[l]);
+    num += l * wgt; den += wgt;
+  }
+  const lag = den > 0 ? num / den : peak;
+
+  // Fold octave errors into a musical range. The ceiling has to sit above 180,
+  // not on it: a true 180 BPM lands on 180.18 from a fractional lag and would
+  // otherwise be halved to 90 by its own guard.
+  let b = 60 / (lag * ODF_DT);
+  while (b < 70)  b *= 2;
+  while (b > 190) b /= 2;
+  bpm = Math.round(b);
+  bpmConf = clamp(best / 0.45, 0, 1);
+}
+
+/* ---------- demo signal ---------- */
+let demoT = 0;
+function demoSpectrum(dt) {
+  demoT += dt;
+  const beat = 0.5;                                   // 120 bpm
+  const bp = (demoT % beat) / beat;
+  const kick = Math.exp(-bp * 8.5);
+  const hp = (demoT % (beat / 2)) / (beat / 2);
+  const hat = Math.exp(-hp * 24) * (0.45 + 0.55 * Math.sin(demoT * 3.1));
+  const sweep = 320 * Math.pow(2, 3.2 * (0.5 + 0.5 * Math.sin(demoT * 0.31)));
+  const out = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const fc = centers[i];
+    const lo = Math.exp(-Math.pow(Math.log2(fc / 62), 2) * 0.85);
+    const hi = 1 / (1 + Math.pow(4200 / fc, 3));
+    const oct = Math.log2(fc / sweep);
+    const pad = 0.42 * Math.exp(-oct * oct * 1.15) * (0.55 + 0.45 * Math.sin(demoT * 2.2 + i * 0.6));
+    const body = 0.20 * Math.exp(-Math.pow(Math.log2(fc / 700), 2) * 0.30)
+               * (0.5 + 0.5 * Math.sin(demoT * 1.3 + i * 0.35));
+    out[i] = clamp(kick * lo * 1.05 + hat * hi * 0.55 + pad + body + Math.random() * 0.05, 0, 1);
+  }
+  return out;
+}
+
+/* ---------- per-frame band extraction ---------- */
+let peakDb = -99, rmsDb = -99, domHz = 0, clipping = 0;
+
+/* ---------- auto gain + silence ---------- */
+const SIL_DB = -58;                            // below this RMS the input is silence
+const SIL_HOLD = 8;                            // seconds of silence before standby
+const AGC_TARGET = CEIL_DB - 4;                // sustained peaks ride just under the top
+let agcGain = 0, agcEnv = -120, silentFor = 0, idleAmt = 0;
+
+function resetAuto() { agcGain = 0; agcEnv = -120; silentFor = 0; idleAmt = 0; }
+
+// Steer the auto gain so the envelope of the loudest band (pre-gain, post-tilt)
+// settles at AGC_TARGET. Fast-attack/slow-release envelope means it ranges on
+// the beats, not the troughs; correction is slow going up, quicker coming down
+// so a hot track is tamed before it pins the display. Frozen during silence so
+// it never cranks into the noise floor.
+function updateAgc(dt, frameTop) {
+  if (frameTop <= -95) return;
+  const atk = 1 - Math.exp(-dt / 0.05), rel = 1 - Math.exp(-dt / 1.5);
+  agcEnv += (frameTop - agcEnv) * (frameTop > agcEnv ? atk : rel);
+  if (S.agc && rmsDb > SIL_DB) {
+    const err = AGC_TARGET - (agcEnv + S.gain + agcGain);
+    agcGain = clamp(agcGain + err * (1 - Math.exp(-dt / (err < 0 ? 0.6 : 2.5))), -30, 30);
+  }
+}
+
+function readSpectrum(dt) {
+  const target = mode === "demo" ? demoSpectrum(dt) : analyseReal(dt);
+
+  // Silence handling: after SIL_HOLD seconds under the floor the display eases
+  // into standby (ghost grid only); any real signal snaps it back fast.
+  if (mode !== "demo") {
+    if (rmsDb > SIL_DB) silentFor = 0; else silentFor += dt;
+    const want = silentFor > SIL_HOLD ? 1 : 0;
+    idleAmt += (want - idleAmt) * (1 - Math.exp(-dt / (want ? 1.2 : 0.25)));
+  } else {
+    silentFor = 0;
+    idleAmt = Math.max(0, idleAmt - dt * 2);
+  }
+
+  // Onset envelope, taken pre-ballistics so the release curve can't smear the
+  // transients we're trying to time. Log-spaced bands make this a mel-band flux.
+  if (!prevBand || prevBand.length !== N) prevBand = new Float32Array(N);
+  let flux = 0;
+  for (let i = 0; i < N; i++) {
+    const d = target[i] - prevBand[i];
+    if (d > 0) flux += d;
+    prevBand[i] = target[i];
+  }
+  pushOnset(flux, dt);
+  tempoAcc += dt;
+  if (tempoAcc >= 0.5) { tempoAcc = 0; estimateTempo(); }
+
+  const atk = 1 - Math.exp(-dt / 0.018);
+  const rel = 1 - Math.exp(-dt / (S.decay / 1000));
+  for (let i = 0; i < N; i++) {
+    const t = target[i];
+    val[i] += (t - val[i]) * (t > val[i] ? atk : rel);
+
+    if (val[i] >= peak[i]) { peak[i] = val[i]; peakHold[i] = 0; peakVel[i] = 0; }
+    else {
+      peakHold[i] += dt;
+      if (peakHold[i] > HOLD_S) {
+        peakVel[i] += GRAVITY * dt;
+        peak[i] = Math.max(val[i], peak[i] - peakVel[i] * dt);
+      }
+    }
+  }
+}
+
+const scratch = { out:null };
+function analyseReal(dt) {
+  if (!scratch.out || scratch.out.length !== N) scratch.out = new Float32Array(N);
+  const out = scratch.out;
+  analyser.getFloatFrequencyData(freqBuf);
+  analyser.getFloatTimeDomainData(timeBuf);
+
+  // level metering off the time domain — honest dBFS
+  let pk = 0, sum = 0;
+  for (let i = 0; i < timeBuf.length; i++) {
+    const a = Math.abs(timeBuf[i]);
+    if (a > pk) pk = a;
+    sum += timeBuf[i] * timeBuf[i];
+  }
+  peakDb = 20 * Math.log10(pk + 1e-9);
+  rmsDb  = 20 * Math.log10(Math.sqrt(sum / timeBuf.length) + 1e-9);
+  clipping = pk > 0.985 ? 1 : Math.max(0, clipping - 0.05);
+
+  const binHz = ac.sampleRate / analyser.fftSize;
+  let bestMag = -999, bestBin = 0, frameTop = -120;
+
+  for (let i = 0; i < N; i++) {
+    const lo = binLo[i], hi = binHi[i];
+    let power = 0, mx = -200, n = 0;
+    for (let b = lo; b <= hi; b++) {
+      const db = freqBuf[b];
+      if (db > mx) mx = db;
+      const amp = Math.pow(10, db / 20);
+      power += amp * amp; n++;
+      if (db > bestMag && b * binHz > 45 && b * binHz < 5200) { bestMag = db; bestBin = b; }
+    }
+    const avgDb = 10 * Math.log10(power / (n || 1) + 1e-20);
+
+    // tonal peaks read better with a max bias; broadband keeps the average honest
+    let db = avgDb * 0.42 + mx * 0.58;
+
+    // pink tilt so 10 kHz isn't permanently pinned to the floor
+    db += clamp(TILT_PER_OCT * Math.log2(centers[i] / 250), -7, 24);
+    if (db > frameTop) frameTop = db;          // pre-gain: what AGC ranges against
+    db += S.gain + (S.agc ? agcGain : 0);
+
+    out[i] = clamp((db - FLOOR_DB) / (CEIL_DB - FLOOR_DB), 0, 1);
+  }
+  domHz = bestMag > -95 ? bestBin * binHz : 0;
+  updateAgc(dt, frameTop);
+  return out;
+}
+
+/* ---------- drawing ---------- */
+function fmtHz(f) {
+  if (f >= 1000) {
+    const k = f / 1000;
+    return (k >= 10 ? Math.round(k) : (Math.round(k * 10) / 10).toString().replace(/\.0$/, "")) + "k";
+  }
+  return String(Math.round(f));
+}
+const LABEL_HZ = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+function drawFrame(t, dt) {
+  // full window mode drops the scales and gutters so the bars go edge to edge
+  const fw = S.fullwin;
+  const padL = fw ? 0 : 46 * U, padR = fw ? 0 : 16 * U;
+  const padT = fw ? 0 : 16 * U, padB = fw ? 0 : 30 * U;
+  const plotW = W - padL - padR;
+  const areaH = H - padT - padB;
+  const plotH = S.mirror ? areaH * 0.74 : areaH;
+  const reflH = areaH - plotH;
+  const baseY = padT + plotH;
+
+  // Bar widths first: skull and heart size their rows from cell width, so the
+  // horizontal geometry has to be known before the row count is chosen.
+  const barW = plotW / N;
+  const gapX = Math.max(1 * U, barW * (N > 40 ? 0.20 : 0.16));
+  const bw = Math.max(1, barW - gapX);
+
+  // A 37x10 letterbox reads fine as a bar but destroys a skull, so the
+  // pictorial shapes trade meter resolution for roughly square cells.
+  const pict = PICTORIAL(S.shape);
+  const rows = pict
+    ? clamp(Math.round(plotH / Math.max(7 * U, bw)), 5, 24)
+    : clamp(Math.floor(plotH / (9 * U)), 12, fw ? 46 : 38);
+  cacheRowColors(rows);
+  const cellH = plotH / rows;
+  const gapY = Math.max(1 * U, cellH * (pict ? 0.13 : 0.24));
+  const cellDraw = cellH - gapY;
+
+  const reflRows = S.mirror ? Math.max(1, Math.floor(reflH / cellH)) : 0;
+
+  /* ---- background + grid on the main canvas ---- */
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#04050a";
+  ctx.fillRect(0, 0, W, H);
+
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "rgba(14,22,44,0.55)");
+  bg.addColorStop(0.55, "rgba(6,9,18,0.30)");
+  bg.addColorStop(1, "rgba(20,6,26,0.42)");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // beat wash
+  if (flash > 0.01) {
+    const c = palColor(0.7);
+    const g = ctx.createRadialGradient(W/2, baseY, 0, W/2, baseY, Math.max(W,H) * 0.62);
+    g.addColorStop(0, rgba(c, 0.13 * flash));
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // screen shake, applied to everything downstream
+  const gAmt = S.glitchAmt / 100;
+  if (shake > 0.01 && gAmt > 0) {
+    ctx.setTransform(1, 0, 0, 1,
+      (Math.random() - 0.5) * 7 * U * shake * gAmt,
+      (Math.random() - 0.5) * 5 * U * shake * gAmt);
+  }
+
+  drawGrid(padL, padT, plotW, plotH, baseY, reflH);
+
+  /* ---- bars onto the fx buffer ---- */
+  fxc.setTransform(1, 0, 0, 1, 0, 0);
+  fxc.clearRect(0, 0, W, H);
+
+  // Square is one cell per band. Hex and triangle split each band into two
+  // sub-columns: hex drops the right one half a row so the two interlock,
+  // triangle alternates point-up / point-down across both column and row.
+  const shape = S.shape, wire = S.wire;
+  const subN = (shape === SQUARE || pict) ? 1 : 2;   // pictorials want the full width
+  const subW = bw / subN;
+  const subGap = subN > 1 ? Math.max(0.5 * U, subW * 0.08) : 0;
+  const cw = subW - subGap;
+  const cellX = (i, s) => padL + i * barW + gapX / 2 + s * subW;
+  const yOff  = s => (shape === HEX && (s & 1)) ? cellH * 0.5 : 0;
+  const flip  = (s, r) => shape === TRI && (((s + r) & 1) === 1);
+
+  // outlines cover far less area than fills, so wireframe needs a lift to read
+  const lw = clamp(cellDraw * 0.16, 1 * U, 2 * U);
+  const paint = style => {
+    if (wire) { fxc.strokeStyle = style; fxc.lineWidth = lw; fxc.stroke(); }
+    else { fxc.fillStyle = style; fxc.fill(); }
+  };
+
+  // Unlit LED ghost grid — the thing that sells it as hardware. It's identical
+  // every frame, so render it once per geometry change and blit it after.
+  const ghKeyNow = [W, H, rows, N, shape, wire ? 1 : 0, S.pal,
+                    S.mirror ? 1 : 0, S.fullwin ? 1 : 0].join(":");
+  if (ghKeyNow !== ghKey) {
+    ghKey = ghKeyNow;
+    gh.width = W; gh.height = H;                 // reassigning also clears it
+    const ghostA = wire ? 0.11 : 0.055;
+    for (let r = 0; r < rows; r++) {
+      const y = baseY - (r + 1) * cellH;
+      ghc.beginPath();
+      for (let i = 0; i < N; i++)
+        for (let s = 0; s < subN; s++) cellPath(ghc, cellX(i, s), y + yOff(s), cw, cellDraw, shape, flip(s, r));
+      if (wire) { ghc.strokeStyle = rgba(rowColors[r], ghostA); ghc.lineWidth = lw; ghc.stroke(); }
+      else { ghc.fillStyle = rgba(rowColors[r], ghostA); ghc.fill(); }
+    }
+  }
+  fxc.globalAlpha = 1;
+  fxc.drawImage(gh, 0, 0);
+
+  // lit cells, one batched path per row so it's still a single op per row
+  const litRow = new Int32Array(N);
+  const live = 1 - idleAmt;                    // standby eases the lit cells out
+  for (let i = 0; i < N; i++) litRow[i] = Math.round(val[i] * rows * live);
+  for (let r = 0; r < rows; r++) {
+    const y = baseY - (r + 1) * cellH;
+    let any = false;
+    fxc.beginPath();
+    for (let i = 0; i < N; i++) {
+      if (litRow[i] <= r) continue;
+      for (let s = 0; s < subN; s++) cellPath(fxc, cellX(i, s), y + yOff(s), cw, cellDraw, shape, flip(s, r));
+      any = true;
+    }
+    if (any) paint(rgba(rowColors[r], 1));
+  }
+
+  // Peak caps. A square cap is the classic thin sliver; hex and triangle slivers
+  // would be too shallow to shape, so those light the whole cell instead. Caps
+  // stay filled even in wireframe so the peak marker still reads as the accent.
+  const capC = palColor(0.94);
+  const capH = shape === SQUARE ? Math.max(1.5 * U, cellDraw * 0.42) : cellDraw;
+  fxc.fillStyle = "rgba(" + capC[0] + "," + capC[1] + "," + capC[2] + ",0.95)";
+  fxc.beginPath();
+  for (let i = 0; i < N; i++) {
+    const pk = peak[i] * live;
+    if (pk < 0.012) continue;
+    const r = clamp(Math.round(pk * rows) - 1, 0, rows - 1);
+    const y = baseY - (r + 1) * cellH;
+    for (let s = 0; s < subN; s++) cellPath(fxc, cellX(i, s), y + yOff(s), cw, capH, shape, flip(s, r));
+  }
+  fxc.fill();
+
+  // mirrored reflection. Keeps the same stagger rather than mirroring it — at
+  // this alpha the difference is invisible, and it avoids poking above baseline.
+  if (S.mirror && reflRows > 0) {
+    for (let r = 0; r < reflRows; r++) {
+      const fade = Math.pow(1 - r / reflRows, 1.5) * 0.34;
+      if (fade < 0.008) continue;
+      const y = baseY + r * cellH + gapY;
+      let any = false;
+      fxc.beginPath();
+      for (let i = 0; i < N; i++) {
+        if (litRow[i] <= r) continue;
+        for (let s = 0; s < subN; s++) cellPath(fxc, cellX(i, s), y + yOff(s), cw, cellDraw, shape, flip(s, r));
+        any = true;
+      }
+      if (any) paint(rgba(rowColors[Math.min(r, rows - 1)], fade));
+    }
+  }
+
+  /* ---- bloom: downsample twice, blur small, add back big ---- */
+  const bAmt = S.bloom / 100;
+  if (bAmt > 0.01) {
+    bl1c.setTransform(1,0,0,1,0,0);
+    bl1c.clearRect(0, 0, bl1.width, bl1.height);
+    bl1c.filter = "blur(" + (3.5 * U) + "px)";
+    bl1c.drawImage(fx, 0, 0, bl1.width, bl1.height);
+    bl1c.filter = "none";
+
+    bl2c.setTransform(1,0,0,1,0,0);
+    bl2c.clearRect(0, 0, bl2.width, bl2.height);
+    bl2c.filter = "blur(" + (4.5 * U) + "px)";
+    bl2c.drawImage(bl1, 0, 0, bl2.width, bl2.height);
+    bl2c.filter = "none";
+
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.55 * bAmt;
+    ctx.drawImage(bl1, 0, 0, W, H);
+    ctx.globalAlpha = 0.75 * bAmt * (1 + 0.5 * flash);
+    ctx.drawImage(bl2, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // chromatic ghosting on the beat
+  if (split > 0.02 && gAmt > 0) {
+    const d = 5 * U * split * gAmt;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.30 * split * Math.min(2, gAmt);
+    ctx.drawImage(fx, -d, 0);
+    ctx.drawImage(fx,  d, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // sharp pass
+  ctx.drawImage(fx, 0, 0);
+
+  drawBaseline(padL, plotW, baseY);
+  drawFreqLabels(padL, barW, baseY, reflH, padB);
+
+  // standby marker, breathing slowly over the ghost grid
+  if (idleAmt > 0.02) {
+    ctx.globalAlpha = idleAmt * (0.5 + 0.22 * Math.sin(t * 1.7));
+    ctx.font = (11 * U) + "px ui-monospace,Consolas,monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(125,155,205,0.9)";
+    ctx.fillText("—  S T A N D B Y  ·  N O   S I G N A L  —", padL + plotW / 2, padT + plotH * 0.45);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+  }
+
+  /* ---- post ---- */
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  if (sliceTTL > 0 && slices.length) {
+    for (let i = 0; i < slices.length; i++) {
+      const s = slices[i];
+      ctx.drawImage(cv, 0, s.y, W, s.h, s.dx, s.y, W, s.h);
+    }
+  }
+
+  if (scanPat) { ctx.fillStyle = scanPat; ctx.fillRect(0, 0, W, H); }
+
+  if (noiseTile) {
+    ctx.globalAlpha = 0.05;
+    ctx.drawImage(noiseTile,
+      -Math.random() * 140, -Math.random() * 140,
+      W + 140, H + 140);
+    ctx.globalAlpha = 1;
+  }
+
+  if (vignette) { ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H); }
+}
+
+function drawGrid(padL, padT, plotW, plotH, baseY, reflH) {
+  ctx.lineWidth = Math.max(1, U * 0.75);
+  ctx.font = (9 * U) + "px ui-monospace,Consolas,monospace";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+
+  const range = CEIL_DB - FLOOR_DB;
+  for (let db = 0; db >= -range; db -= 10) {
+    const y = baseY - (1 + db / range) * plotH;
+    ctx.strokeStyle = db === 0 ? "rgba(0,232,255,0.18)" : "rgba(60,90,140,0.11)";
+    ctx.beginPath();
+    ctx.moveTo(padL, Math.round(y) + 0.5);
+    ctx.lineTo(padL + plotW, Math.round(y) + 0.5);
+    ctx.stroke();
+    if (!S.fullwin) {
+      ctx.fillStyle = "rgba(90,120,170,0.62)";
+      ctx.fillText(db === 0 ? "0" : String(db), padL - 8 * U, y);
+    }
+  }
+
+  if (!S.fullwin) {
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(70,100,150,0.5)";
+    ctx.fillText("dB", 8 * U, padT + 4 * U);
+  }
+
+  // vertical decade rules
+  ctx.strokeStyle = "rgba(60,90,140,0.09)";
+  for (let i = 0; i < LABEL_HZ.length; i++) {
+    const f = LABEL_HZ[i];
+    if (f < F_MIN || f > F_MAX) continue;
+    const x = padL + plotW * (Math.log(f / F_MIN) / Math.log(F_MAX / F_MIN));
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x) + 0.5, padT);
+    ctx.lineTo(Math.round(x) + 0.5, baseY + reflH);
+    ctx.stroke();
+  }
+}
+
+function drawBaseline(padL, plotW, baseY) {
+  const c = palColor(0.15);
+  const g = ctx.createLinearGradient(padL, 0, padL + plotW, 0);
+  g.addColorStop(0,   rgba(c, 0.05));
+  g.addColorStop(0.5, rgba(c, 0.55));
+  g.addColorStop(1,   rgba(c, 0.05));
+  ctx.fillStyle = g;
+  ctx.fillRect(padL, baseY, plotW, Math.max(1, U));
+}
+
+function drawFreqLabels(padL, barW, baseY, reflH, padB) {
+  if (S.fullwin) return;                       // no gutter to put them in
+  ctx.font = (9 * U) + "px ui-monospace,Consolas,monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "rgba(95,125,175,0.72)";
+  const y = baseY + reflH + padB * 0.22;
+  let last = -1e9;
+  for (let i = 0; i < LABEL_HZ.length; i++) {
+    const f = LABEL_HZ[i];
+    let best = -1, bestD = 1e9;
+    for (let b = 0; b < N; b++) {
+      const d = Math.abs(Math.log(centers[b] / f));
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    if (best < 0 || bestD > 0.28) continue;
+    const x = padL + (best + 0.5) * barW;
+    if (x - last < 34 * U) continue;
+    last = x;
+    ctx.fillText(fmtHz(f), x, y);
+  }
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(40,70,110,0.55)";
+  ctx.fillText("Hz", 8 * U, y);
+}
+
+/* ---------- readouts ---------- */
+let uiAcc = 0;
+function updateReadouts(dt) {
+  uiAcc += dt;
+  if (uiAcc < 0.1) return;
+  uiAcc = 0;
+  $("roSrc").textContent = srcLabel;
+  if (mode === "demo") {
+    $("roRate").textContent = "—";
+    $("roPeak").textContent = "—";
+    $("roRms").textContent  = "—";
+  } else {
+    $("roRate").textContent = (ac.sampleRate / 1000).toFixed(1) + "k";
+    $("roPeak").textContent = peakDb <= -95 ? "-∞" : peakDb.toFixed(1);
+    $("roRms").textContent  = rmsDb  <= -95 ? "-∞" : rmsDb.toFixed(1);
+    $("roPeak").classList.toggle("hot", peakDb > -1.5);
+  }
+  $("roDom").textContent = domHz > 0 && mode !== "demo" ? fmtHz(domHz) : "—";
+  // gain readout owns its text here so the AGC contribution stays visible
+  if (S.agc && mode !== "demo") {
+    const a = Math.round(agcGain);
+    $("vGain").textContent = (S.gain > 0 ? "+" : "") + S.gain + " (" + (a >= 0 ? "+" : "") + a + "A)";
+  } else {
+    $("vGain").textContent = (S.gain > 0 ? "+" : "") + S.gain + " dB";
+  }
+  // a weak autocorrelation peak still gives a number, so mark it as unlocked
+  $("roBpm").textContent = bpm ? String(bpm) : "—";
+  $("roBpm").classList.toggle("soft", bpm > 0 && bpmConf < 0.3);
+
+  const led = $("led");
+  led.className = "led" + (clipping > 0.5 ? " clip" : (mode !== "demo" ? " live" : ""));
+
+  if (S.fullwin && document.body.classList.contains("reveal")) {
+    $("fwInfo").innerHTML = "SRC <b>" + srcLabel + "</b>"
+      + (bpm ? " &nbsp;·&nbsp; BPM <b>" + bpm + "</b>" : "")
+      + (mode !== "demo" && peakDb > -95 ? " &nbsp;·&nbsp; PK <b>" + peakDb.toFixed(1) + "</b>" : "");
+  }
+}
+
+/* ---------- clip recording ----------
+   15 s WebM straight off the canvas via captureStream + MediaRecorder. When a
+   live capture is running, its audio track is cloned into the clip so the music
+   ships with the picture; demo mode records video only. The scanlines, grain
+   and vignette are all drawn on the canvas itself, so the clip keeps the look. */
+const REC_SECS = 15;
+let recorder = null, recChunks = [], recLeft = 0, recTick = null;
+
+function updateRecUi() {
+  const b = $("bRec");
+  b.classList.toggle("rec", !!recorder);
+  b.textContent = recorder ? "■ " + recLeft + "s" : "⏺ Rec";
+}
+
+function startRec() {
+  if (recorder) { stopRec(); return; }         // second press ends the take early
+  if (!cv.captureStream || !window.MediaRecorder) {
+    showMsg("RECORDING UNSUPPORTED", "This browser has no canvas captureStream / MediaRecorder. Chrome and Edge do.");
+    return;
+  }
+  const rs = cv.captureStream(60);
+  if (stream) {
+    const at = stream.getAudioTracks()[0];
+    if (at) rs.addTrack(at.clone());           // clone: recorder teardown can't touch the analyser feed
+  }
+  let mime = "";
+  for (const m of ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp9",
+                   "video/webm;codecs=vp8,opus", "video/webm;codecs=vp8", "video/webm"]) {
+    if (MediaRecorder.isTypeSupported(m)) { mime = m; break; }
+  }
+  const rec = new MediaRecorder(rs, {
+    mimeType: mime || undefined,
+    videoBitsPerSecond: 8_000_000,             // neon on black bands hard below this
+    audioBitsPerSecond: 192_000
+  });
+  recChunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  rec.onstop = () => {
+    const type = rec.mimeType || "video/webm";
+    rs.getTracks().forEach(t => t.stop());
+    recorder = null;
+    updateRecUi();
+    const blob = new Blob(recChunks, { type });
+    recChunks = [];
+    if (!blob.size) { showMsg("NOTHING CAPTURED", "The recorder produced no data — the display may not have been painting."); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "neon-eq-" + new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-") + ".webm";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+  try {
+    rec.start(250);                            // timeslice so a crash never loses the whole take
+  } catch (err) {
+    rs.getTracks().forEach(t => t.stop());
+    showMsg("RECORDER FAILED", (err && err.message) || String(err));
+    return;
+  }
+  recorder = rec;
+  recLeft = REC_SECS;
+  updateRecUi();
+  recTick = setInterval(() => {
+    recLeft--;
+    if (recLeft <= 0) stopRec(); else updateRecUi();
+  }, 1000);
+}
+
+function stopRec() {
+  if (!recorder) return;
+  clearInterval(recTick);
+  recorder.stop();                             // onstop finalizes and downloads
+}
+
+$("bRec").onclick = startRec;
+
+/* ---------- wake lock ----------
+   Hold the screen awake while the page is visible, so the analyzer can live on
+   a spare display without the monitor sleeping mid-set. The lock auto-releases
+   when the tab is hidden, so this is polite by construction; re-acquire on
+   return. Denials (battery saver, unsupported browser) are non-fatal. */
+let wakeLock = null;
+async function holdWake() {
+  if (!("wakeLock" in navigator) || wakeLock || document.visibilityState !== "visible") return;
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeLock.addEventListener("release", () => { wakeLock = null; });
+  } catch (e) { /* fine — screen just sleeps as normal */ }
+}
+document.addEventListener("visibilitychange", holdWake);
+holdWake();
+
+/* ---------- main loop ---------- */
+const bpmDot = $("bpmDot");
+let last = performance.now() / 1000;
+function loop() {
+  requestAnimationFrame(loop);
+  const now = performance.now() / 1000;
+  let dt = now - last;
+  last = now;
+  if (dt > 0.1) dt = 0.1;                     // tab was backgrounded; don't explode
+  if (W === 0) return;
+
+  readSpectrum(dt);
+  detectBeat(now, dt);
+  drawFrame(now, dt);
+  updateReadouts(dt);
+  bpmDot.style.opacity = flash.toFixed(2);   // per-frame so the pulse stays crisp
+}
+
+/* ---------- audio capture ---------- */
+function ensureCtx() {
+  if (!ac) {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = ac.createAnalyser();
+    analyser.fftSize = 8192;
+    analyser.smoothingTimeConstant = 0;       // our own ballistics handle smoothing
+    analyser.minDecibels = -110;
+    analyser.maxDecibels = 0;
+    freqBuf = new Float32Array(analyser.frequencyBinCount);
+    timeBuf = new Float32Array(analyser.fftSize);
+  }
+  if (ac.state === "suspended") ac.resume();
+  mapBins();
+}
+
+function teardown() {
+  if (srcNode) { try { srcNode.disconnect(); } catch (e) {} srcNode = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+}
+
+function showMsg(title, body) {
+  $("msgT").textContent = title;
+  $("msgB").textContent = body;
+  $("msg").classList.remove("hidden");
+}
+function hideMsg() { $("msg").classList.add("hidden"); }
+
+async function startSystem() {
+  hideMsg();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    showMsg("CAPTURE UNAVAILABLE",
+      "This browser has no getDisplayMedia. Use Chrome or Edge, or fall back to MIC.");
+    return;
+  }
+  try {
+    const s = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 1 },                // Chrome demands a video track to grant audio
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        suppressLocalAudioPlayback: false     // keep the music in your speakers
+      },
+      systemAudio: "include",
+      selfBrowserSurface: "exclude"
+    });
+    const tracks = s.getAudioTracks();
+    if (!tracks.length) {
+      s.getTracks().forEach(t => t.stop());
+      showMsg("NO AUDIO TRACK",
+        "You shared a surface but not its sound. Re-run and tick “Also share system audio” "
+        + "(Entire Screen) or “Also share tab audio” (Chrome Tab) in the picker.");
+      return;
+    }
+    teardown();
+    ensureCtx();
+    stream = s;
+    srcNode = ac.createMediaStreamSource(s);
+    srcNode.connect(analyser);                // analyser is a sink; nothing routed to output
+    mode = "system"; srcLabel = "SYS AUDIO";
+    bassHist = []; resetTempo(); resetAuto();
+    tracks[0].addEventListener("ended", () => { toDemo("SHARE ENDED"); });
+    setModeButtons();
+  } catch (err) {
+    if (err && err.name === "NotAllowedError") return;   // user cancelled, no drama
+    showMsg("CAPTURE FAILED", (err && err.message) || String(err));
+  }
+}
+
+async function startMic() {
+  hideMsg();
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    });
+    teardown();
+    ensureCtx();
+    stream = s;
+    srcNode = ac.createMediaStreamSource(s);
+    srcNode.connect(analyser);
+    mode = "mic"; srcLabel = "MIC IN";
+    bassHist = []; resetTempo(); resetAuto();
+    s.getAudioTracks()[0].addEventListener("ended", () => { toDemo("MIC LOST"); });
+    setModeButtons();
+  } catch (err) {
+    if (err && err.name === "NotAllowedError") {
+      showMsg("MIC DENIED", "Allow microphone access for this page, or use SYSTEM AUDIO / DEMO.");
+      return;
+    }
+    showMsg("MIC FAILED", (err && err.message) || String(err));
+  }
+}
+
+function toDemo(reason) {
+  teardown();
+  mode = "demo"; srcLabel = "DEMO";
+  peakDb = rmsDb = -99; domHz = 0; clipping = 0;
+  bassHist = []; resetTempo(); resetAuto();
+  setModeButtons();
+  if (reason) { showMsg(reason, "Falling back to the synthetic signal. Re-arm a source when ready."); setTimeout(hideMsg, 3200); }
+}
+
+function setModeButtons() {
+  $("bSys").classList.toggle("on", mode === "system");
+  $("bMic").classList.toggle("on", mode === "mic");
+  $("bDemo").classList.toggle("on", mode === "demo");
+}
+
+/* ---------- controls ---------- */
+$("bSys").onclick  = startSystem;
+$("bMic").onclick  = startMic;
+$("bDemo").onclick = () => { hideMsg(); toDemo(null); };
+$("bStop").onclick = () => { hideMsg(); toDemo(null); };
+
+$("selBands").value = String(S.bands);
+$("selBands").onchange = e => {
+  S.bands = +e.target.value; buildBands(S.bands); bassHist = []; resetTempo(); save();
+};
+
+$("selPal").value = String(S.pal);
+$("selPal").onchange = e => { S.pal = +e.target.value; rowsCached = -1; save(); };
+
+$("selShape").value = String(S.shape);
+$("selShape").onchange = e => { S.shape = +e.target.value; save(); };
+
+function bindRange(id, valId, key, fmt) {
+  const r = $(id), v = $(valId);
+  r.value = String(S[key]);
+  v.textContent = fmt(S[key]);
+  r.oninput = e => { S[key] = +e.target.value; v.textContent = fmt(S[key]); save(); };
+}
+bindRange("rGain",  "vGain",  "gain",  x => (x > 0 ? "+" : "") + x + " dB");
+bindRange("rDecay", "vDecay", "decay", x => x + "ms");
+bindRange("rBloom", "vBloom", "bloom", x => x + "%");
+bindRange("rGAmt",  "vGAmt",  "glitchAmt",  x => x + "%");
+bindRange("rGSens", "vGSens", "glitchSens", x => x + "%");
+
+$("bAgc").onclick = () => {
+  S.agc = !S.agc;
+  $("bAgc").classList.toggle("on", S.agc);
+  if (!S.agc) agcGain = 0;                     // manual means manual, no leftover offset
+  save();
+};
+$("bWire").onclick = () => { S.wire = !S.wire; $("bWire").classList.toggle("on", S.wire); save(); };
+$("bMirror").onclick = () => { S.mirror = !S.mirror; $("bMirror").classList.toggle("on", S.mirror); save(); };
+$("bGlitch").onclick = () => {
+  S.glitch = !S.glitch;
+  $("bGlitch").classList.toggle("on", S.glitch);
+  if (!S.glitch) { split = shake = 0; sliceTTL = 0; }
+  save();
+};
+/* ---------- full window mode ---------- */
+let revealTimer = 0, hintTimer = 0;
+
+function flashHint() {
+  const h = $("fwhint");
+  h.classList.add("show");
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => h.classList.remove("show"), 2600);
+}
+
+function reveal() {
+  if (!S.fullwin) return;
+  document.body.classList.add("reveal");
+  clearTimeout(revealTimer);
+  revealTimer = setTimeout(() => document.body.classList.remove("reveal"), 2200);
+}
+
+function setFullWin(on, announce) {
+  S.fullwin = !!on;
+  document.body.classList.toggle("fullwin", S.fullwin);
+  $("bFullWin").classList.toggle("on", S.fullwin);
+  if (!S.fullwin) {
+    document.body.classList.remove("reveal");
+    clearTimeout(revealTimer);
+    $("fwhint").classList.remove("show");
+    clearTimeout(hintTimer);
+  } else if (announce) {
+    flashHint();
+    reveal();
+  }
+  resize();                                  // main grew/shrank; canvas must follow
+  save();
+}
+
+$("bFullWin").onclick  = () => setFullWin(!S.fullwin, true);
+$("bExitFw").onclick   = () => setFullWin(false, false);
+document.addEventListener("mousemove", reveal);
+document.addEventListener("mousedown", reveal);
+
+$("bFull").onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen().catch(() => {});
+};
+$("bHelp").onclick = () => $("help").classList.toggle("show");
+$("help").onclick  = e => { if (e.target.id === "help") $("help").classList.remove("show"); };
+
+$("bAgc").classList.toggle("on", S.agc);
+$("bWire").classList.toggle("on", S.wire);
+$("bMirror").classList.toggle("on", S.mirror);
+$("bGlitch").classList.toggle("on", S.glitch);
+
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  const k = e.key.toLowerCase();
+  if (k === "w") setFullWin(!S.fullwin, true);
+  else if (k === "f") $("bFull").click();
+  else if (k === "d") $("bDemo").click();
+  else if (k === "m") $("bMirror").click();
+  else if (k === "g") $("bGlitch").click();
+  else if (k === "h") {
+    S.shape = (S.shape + 1) % 5;               // square → hex → triangle → skull → heart
+    $("selShape").value = String(S.shape);
+    save();
+  }
+  else if (k === "r") $("bWire").click();
+  else if (k === "a") $("bAgc").click();
+  else if (k === "c") startRec();
+  else if (k === "p") {                        // 1-9 can't reach every palette any more
+    S.pal = (S.pal + (e.shiftKey ? PALETTES.length - 1 : 1)) % PALETTES.length;
+    $("selPal").value = String(S.pal);
+    rowsCached = -1; save();
+  }
+  else if (k === "?" || k === "/") { e.preventDefault(); $("bHelp").click(); }
+  else if (k === "escape") {
+    // peel one layer at a time: help, then full window, then any message
+    if ($("help").classList.contains("show")) $("help").classList.remove("show");
+    else if (S.fullwin) setFullWin(false, false);
+    else hideMsg();
+  }
+  else if (k >= "1" && k <= "9" && +k <= PALETTES.length) {
+    S.pal = +k - 1; $("selPal").value = String(S.pal); rowsCached = -1; save();
+  }
+  else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+    e.preventDefault();
+    S.gain = clamp(S.gain + (e.key === "ArrowUp" ? 1 : -1), -12, 30);
+    $("rGain").value = String(S.gain);
+    $("vGain").textContent = (S.gain > 0 ? "+" : "") + S.gain + " dB";
+    save();
+  }
+});
+
+/* ---------- boot ---------- */
+buildBands(S.bands);
+makeNoise();
+resize();
+setFullWin(S.fullwin, S.fullwin);           // restore the mode, and re-announce the way out
+setModeButtons();
+requestAnimationFrame(loop);
+
+// first run gets the instructions, everyone else gets straight to the lights
+try {
+  if (!localStorage.getItem("neoneq_seen")) {
+    $("help").classList.add("show");
+    localStorage.setItem("neoneq_seen", "1");
+  }
+} catch (e) {}
+</script>
+</body>
+</html>
